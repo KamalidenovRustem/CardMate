@@ -1,0 +1,586 @@
+import telebot
+from telebot import types
+import mysql.connector
+
+# Свои настройки PostgreSQL
+db_host = 'sql11.freesqldatabase.com'
+db_name = 'sql11662955'
+db_user = 'sql11662955'
+db_password = 'z6dgC4zXVa'
+
+# Соединение с базой данных
+conn = mysql.connector.connect(
+    host=db_host,
+    database=db_name,
+    user=db_user,
+    password=db_password,
+    connection_timeout=30
+)
+cursor = conn.cursor()
+
+# Таблица для хранения заявок
+cursor.execute(
+    """
+    CREATE TABLE IF NOT EXISTS requests (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        text TEXT,
+        photo TEXT,
+        video TEXT,
+        status INTEGER,
+        rejection_reason TEXT,
+        time TIMESTAMP
+    )
+    """
+)
+
+# Создание таблицы модераторов, если она не существует
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS moderators (
+        id SERIAL PRIMARY KEY,
+        moder_id BIGINT
+    );
+''')
+
+# Таблица для хранения информации о пользователях
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT
+    );
+''')
+
+
+# Функция для вставки данных в таблицу
+def insert_data(cursor, table_name, column_name, value):
+    try:
+        insert_query = f"INSERT IGNORE INTO `{table_name}` (`{column_name}`) VALUES (%s);"
+        cursor.execute(insert_query, (value,))
+        conn.commit()
+        print(f"Данные успешно вставлены в таблицу {table_name}.")
+    except Exception as e:
+        conn.rollback()
+        print(f"Ошибка: {e}")
+
+
+# Вставка модератора в таблицу "moderators"
+first_moder_id = 1732450131
+insert_data(cursor, 'moderators', 'moder_id', first_moder_id)
+
+Token = '6965079259:AAEBifo01s1mQPA_oLXre3WxEW0lw2h1oL0'
+bot = telebot.TeleBot(Token)
+
+
+# Извлечение идентификаторов модераторов из базы данных и заполнение списка moderator_ids
+def retrieve_moderator_ids(cursor):
+    # SQL-запрос для извлечения идентификаторов модераторов
+    cursor.execute("SELECT moder_id FROM moderators")
+    moderator_records = cursor.fetchall()
+
+    # Извлечение идентификаторов модераторов из записей и сохранение их в списке moderator_ids
+    moderator_ids = [record[0] for record in moderator_records]
+
+    return moderator_ids
+
+
+moderator_ids = retrieve_moderator_ids(cursor)
+
+
+def create_keyboard(buttons):
+    keyboard = types.ReplyKeyboardMarkup(row_width=len(buttons), resize_keyboard=True)
+    for text in buttons:
+        button = types.KeyboardButton(text)
+        keyboard.add(button)
+    return keyboard
+
+
+# Клавиатура Смена языка
+language_buttons = ["English", "Русский", "Казахский", "汉语"]
+language_keyboard = create_keyboard(language_buttons)
+
+# Клавиатура Русская
+russia_buttons = ["О нас", "Наша команда", "Проекты", "Связаться с нами", "Поменять язык"]
+russia_keyboard = create_keyboard(russia_buttons)
+
+# Клавиатура English
+english_buttons = ["About us", "Our team", "Projects", "Contact with us", "Change language"]
+english_keyboard = create_keyboard(english_buttons)
+
+# Клавиатура казахская
+kz_buttons = ["Біз туралы", "Біздің команда", "Жобалар", "Бізбен хабарласыңыз", "Тілді өзгерту"]
+kz_keyboard = create_keyboard(kz_buttons)
+
+# Клавиатура китайская
+china_buttons = ["关于我们", "我们的团队", "項目", "联络我们", "更改语言"]
+china_keyboard = create_keyboard(china_buttons)
+
+# клавиатура модератора
+moderator_buttons = ["Посмотреть заявки", "рассылка"]
+moderator_keyboard = create_keyboard(moderator_buttons)
+
+
+# Обработчик команды "старт"
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    user_id = message.from_user.id
+    if message.chat.type != 'private':
+        bot.send_message(message.chat.id, "Этот бот работает только в приватных чатах.")
+        return
+
+    # Check if the user is not already in the 'users' table
+    cursor.execute("SELECT id FROM users WHERE user_id = %s", (user_id,))
+    user_exists = cursor.fetchone()
+
+    if not user_exists:
+        # If the user is not in the database, insert them
+        cursor.execute("INSERT INTO users (user_id) VALUES (%s)", (user_id,))
+        conn.commit()
+        bot.send_message(message.chat.id, 'Приветствую! \n Пожалуйста, выберите язык.', reply_markup=language_keyboard)
+    else:
+        bot.send_message(message.chat.id, 'Приветствую! \n Пожалуйста, выберите язык.', reply_markup=language_keyboard)
+
+
+# Обработчик для языка "English"
+@bot.message_handler(func=lambda message: message.text == "English")
+def handle_english_language(message):
+    bot.send_message(message.chat.id, 'You have selected English language.', reply_markup=english_keyboard)
+
+
+# Обработчик для языка "Русский"
+@bot.message_handler(func=lambda message: message.text == "Русский")
+def handle_russian_language(message):
+    bot.send_message(message.chat.id, 'Вы выбрали русский язык.', reply_markup=russia_keyboard)
+
+
+# Обработчик для языка "Казахский"
+@bot.message_handler(func=lambda message: message.text == "Казахский")
+def handle_kazakh_language(message):
+    bot.send_message(message.chat.id, 'Сіз қазақ тілін таңдадыңыз.', reply_markup=kz_keyboard)
+
+
+# Обработчик для языка "汉语"
+@bot.message_handler(func=lambda message: message.text == "汉语")
+def handle_chinese_language(message):
+    bot.send_message(message.chat.id, '您选择了汉语。', reply_markup=china_keyboard)
+
+
+# Команда "О нас"
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'о нас')
+def about_us(message):
+    if message.text.lower() == 'о нас':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button = types.InlineKeyboardButton(text='Ссылка на наш сайт',
+                                                url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button)
+        # bot.delete_message(message.chat.id, message.message_id - 1)
+        bot.send_message(message.chat.id, "2 \n 3", reply_markup=Keyboard)
+
+
+# Команда "about us"
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'about us')
+def about_us1(message):
+    if message.text.lower() == 'about us':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button = types.InlineKeyboardButton(text='Ссылка на наш сайт',
+                                                url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button)
+        # bot.delete_message(message.chat.id, message.message_id - 1)
+        bot.send_message(message.chat.id, "2 \n 3", reply_markup=Keyboard)
+
+
+# Команда біз туралы
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'біз туралы')
+def about_us2(message):
+    if message.text.lower() == 'біз туралы':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button = types.InlineKeyboardButton(text='Ссылка на наш сайт',
+                                                url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button)
+        # bot.delete_message(message.chat.id, message.message_id - 1)
+        bot.send_message(message.chat.id, "2 \n 3", reply_markup=Keyboard)
+
+
+# Команда біз туралы
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == '关于我们')
+def about_us3(message):
+    if message.text.lower() == '关于我们':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button = types.InlineKeyboardButton(text='Ссылка на наш сайт',
+                                                url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button)
+        # bot.delete_message(message.chat.id, message.message_id - 1)
+        bot.send_message(message.chat.id, "2 \n 3", reply_markup=Keyboard)
+
+
+# Команда Поменять язык
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'поменять язык')
+def change_language_russia(message):
+    if message.text.lower() == 'поменять язык':
+        bot.send_message(message.chat.id, "Изменить язык", reply_markup=language_keyboard)
+
+
+# Команда Поменять язык
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'change language')
+def change_language_english(message):
+    if message.text.lower() == 'change language':
+        bot.send_message(message.chat.id, "change language", reply_markup=language_keyboard)
+
+
+# Команда Поменять язык
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'тілді өзгерту')
+def change_language_kz(message):
+    if message.text.lower() == 'тілді өзгерту':
+        bot.send_message(message.chat.id, "тілді өзгерту", reply_markup=language_keyboard)
+
+
+# Команда Поменять язык
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == '更改语言')
+def change_language_china(message):
+    if message.text.lower() == '更改语言':
+        bot.send_message(message.chat.id, "更改语言", reply_markup=language_keyboard)
+
+
+# Команда наша команда
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'наша команда')
+def change_language_russia(message):
+    if message.text.lower() == 'наша команда':
+        bot.send_message(message.chat.id, "Наша команда \n Рустем. \n ссылка на инсту \n Марсель \n ссылка на инсту",
+                         reply_markup=russia_keyboard)
+
+
+# Команда наша команда
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'our team')
+def change_language_russia(message):
+    if message.text.lower() == 'our team':
+        bot.send_message(message.chat.id, "Our team \n Rustem. \n info \n Marsele \n info",
+                         reply_markup=english_keyboard)
+
+
+# Команда наша команда
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'біздің команда')
+def change_language_russia(message):
+    if message.text.lower() == 'біздің команда':
+        bot.send_message(message.chat.id, "Біздің команда \n Рустем. \n ссылка на инсту \n Марсель \n ссылка на инсту",
+                         reply_markup=kz_keyboard)
+
+
+# Команда наша команда
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == '我们的团队')
+def change_language_russia(message):
+    if message.text.lower() == '我们的团队':
+        bot.send_message(message.chat.id, "我们的团队 \n 卢斯塔姆. \n INFO \n 马赛 \n info",
+                         reply_markup=china_keyboard)
+
+
+# Команда проекты
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'проекты')
+def about_us(message):
+    if message.text.lower() == 'проекты':
+        markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+        button1 = types.KeyboardButton(text='Бот для СМИ')
+        button2 = types.KeyboardButton(text='Бот визитница')
+        button3 = types.KeyboardButton(text='Главное меню')
+        markup.add(button1, button2, button3)
+        bot.send_message(message.chat.id, "паап", reply_markup=markup)
+
+
+# Обработчик для выхода в главное меню
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'главное меню')
+def exit_to_main_menu(message):
+    bot.send_message(message.chat.id, "Выход в главное меню", reply_markup=russia_keyboard)
+
+
+# Команда проекты
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'projects')
+def about_us(message):
+    if message.text.lower() == 'projects':
+        markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+        button1 = types.KeyboardButton(text='BOT for media')
+        button2 = types.KeyboardButton(text='BOT adcard')
+        button3 = types.KeyboardButton(text='exit')
+        markup.add(button1, button2, button3)
+        bot.send_message(message.chat.id, "2 \n 3", reply_markup=markup)
+
+
+# Обработчик для выхода в главное меню
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'exit')
+def exit_to_main_menu(message):
+    bot.send_message(message.chat.id, "exit", reply_markup=english_keyboard)
+
+
+# Команда проекты
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'жобалар')
+def about_us(message):
+    if message.text.lower() == 'жобалар':
+        markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+        button1 = types.KeyboardButton(text='бот бақ')
+        button2 = types.KeyboardButton(text='Бот визиткасы')
+        button3 = types.KeyboardButton(text='шығу')
+        markup.add(button1, button2, button3)
+        bot.send_message(message.chat.id, "2 \n 3", reply_markup=markup)
+
+
+# Обработчик для выхода в главное меню
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'шығу')
+def exit_to_main_menu(message):
+    bot.send_message(message.chat.id, "шығу", reply_markup=kz_keyboard)
+
+
+# Команда проекты
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == '項目')
+def about_us(message):
+    if message.text.lower() == '項目':
+        markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+        button1 = types.KeyboardButton(text='媒体')
+        button2 = types.KeyboardButton(text='名片')
+        button3 = types.KeyboardButton(text='出口')
+        markup.add(button1, button2, button3)
+        if message.text.lower() == 'выход в главное меню':
+            bot.send_message(message.chat.id, "Выход в главное меню", reply_markup=china_keyboard)
+        bot.send_message(message.chat.id, "2 \n 3", reply_markup=markup)
+
+
+# Обработчик для выхода в главное меню
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == '出口')
+def exit_to_main_menu(message):
+    bot.send_message(message.chat.id, "出口", reply_markup=china_keyboard)
+
+
+# Команда бот для СМИ
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'бот для сми')
+def about_us(message):
+    if message.text.lower() == 'бот для сми':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='бот для СМИ', url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# Команда бот визитница
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'бот визитница')
+def about_us(message):
+    if message.text.lower() == 'бот визитница':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='Бот визитница',
+                                                 url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# Команда бот для СМИ
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'bot for media')
+def about_us(message):
+    if message.text.lower() == 'bot for media':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='bot for media',
+                                                 url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# Команда бот для СМИ
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'bot adcard')
+def about_us(message):
+    if message.text.lower() == 'bot adcard':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='bot adcard', url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# Команда бот для СМИ
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'бот бақ')
+def about_us(message):
+    if message.text.lower() == 'бот бақ':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='бот бақ', url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# Команда бот для СМИ
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == 'бот визиткасы')
+def about_us(message):
+    if message.text.lower() == 'бот визиткасы':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='Бот визиткасы',
+                                                 url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# Команда бот для СМИ
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == '媒体')
+def about_us(message):
+    if message.text.lower() == '媒体':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='媒体', url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# Команда бот для СМИ
+@bot.message_handler(content_types=['text'],
+                     func=lambda message: message.chat.type == 'private' and message.text.lower() == '名片')
+def about_us(message):
+    if message.text.lower() == '名片':
+        Keyboard = types.InlineKeyboardMarkup()
+        Url_button1 = types.InlineKeyboardButton(text='名片', url="https://www.youtube.com/watch?v=Zi_XLOBDo_Y")
+        Keyboard.add(Url_button1)
+        bot.send_message(message.chat.id, "паап", reply_markup=Keyboard)
+
+
+# модератор
+
+
+# Функция для получения всех пользователей из базы данных
+def get_all_users():
+    users = []
+    cursor.execute("SELECT user_id FROM users")
+    result = cursor.fetchall()
+    for row in result:
+        users.append(row[0])
+    return users
+
+
+# Функция для начала рассылки
+@bot.message_handler(
+    func=lambda message: message.chat.type == 'private' and message.text and message.text.lower() == 'рассылка')
+def send_all_message(message):
+    user_id = message.from_user.id
+
+    if user_id not in moderator_ids:
+        bot.send_message(user_id, "У вас нет прав для выполнения этой команды.")
+        return
+
+    markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    button_exit = types.KeyboardButton(text='выход в меню модератора')
+    markup.add(button_exit)
+    bot.send_message(message.chat.id, "Введите текст рассылки:", reply_markup=markup)
+
+    # Регистрируем следующий шаг для ввода текста рассылки
+    bot.register_next_step_handler(message, process_distribution_text)
+
+
+# Функция для обработки текста рассылки
+def process_distribution_text(message):
+    # Сохраняем текст рассылки
+    distribution_text = message.text
+    user_id = message.from_user.id
+
+    if distribution_text.lower() == 'выход в меню модератора':
+        bot.send_message(message.chat.id, "Выход в меню модератора", reply_markup=moderator_keyboard)
+        return
+
+    # Если пользователь не захотел выйти, спрашиваем текст для кнопки
+    bot.send_message(message.chat.id, "Введите текст для кнопки:")
+    bot.register_next_step_handler(message, process_button_text, distribution_text)
+
+
+# Функция для обработки текста кнопки
+def process_button_text(message, distribution_text):
+    button_text = message.text
+    # Регистрируем следующий шаг для ввода URL кнопки
+    bot.send_message(message.chat.id, "Введите URL для кнопки:")
+    bot.register_next_step_handler(message, process_button_url, distribution_text, button_text)
+
+
+# Функция для обработки URL кнопки
+def process_button_url(message, distribution_text, button_text):
+    button_url = message.text
+    chat_id = message.chat.id
+
+    if button_url.lower() == 'пропустить':
+        markup = None
+        preview_text = "Предпросмотр сообщения без кнопки:"
+
+    else:
+        # Если модератор добавил URL, создаем кнопку
+        markup = types.InlineKeyboardMarkup()
+        button = types.InlineKeyboardButton(text=button_text, url=button_url)
+        markup.add(button)
+        preview_text = "Предпросмотр сообщения с кнопкой:"
+
+    # Создаём inline клавиатуру с кнопкой
+    markup = types.InlineKeyboardMarkup()
+    button = types.InlineKeyboardButton(text=button_text, url=button_url)
+    markup.add(button)
+
+    # Показываем предпросмотр сообщения
+    bot.send_message(chat_id, "Предпросмотр сообщения с кнопкой:", reply_markup=markup)
+    bot.send_message(chat_id, distribution_text)
+
+    # Спрашиваем у пользователя, хочет ли он что-то изменить или отправить рассылку
+    send_or_edit_markup = types.ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
+    send_button = types.KeyboardButton("Отправить")
+    edit_button = types.KeyboardButton("Редактировать")
+    send_or_edit_markup.add(send_button, edit_button)
+    bot.send_message(chat_id,
+                     "Если всё верно, выберите 'Отправить'. Если хотите редактировать, нажмите 'Редактировать'.",
+                     reply_markup=send_or_edit_markup)
+    bot.register_next_step_handler(message, final_decision, distribution_text, button_text, button_url)
+
+
+# Функция для окончательного решения
+def final_decision(message, distribution_text, button_text, button_url):
+    if message.text == "Отправить":
+        send_message_to_all_users(message, distribution_text, button_text, button_url)
+    elif message.text == "Редактировать":
+        # Возвращаем пользователя к шагу ввода текста рассылки
+        send_all_message(message)
+
+
+# Функция для отправки сообщения всем пользователям
+def send_message_to_all_users(message, distribution_text, button_text, button_url):
+    user_id = message.from_user.id
+    if user_id in moderator_ids:
+        user_ids = get_all_users()  # Эта функция должна возвращать список ID пользователей бота
+
+        for uid in user_ids:
+            try:
+                if message.content_type == 'photo':
+                    photo_id = message.photo[-1].file_id
+                    bot.send_photo(uid, photo_id, caption=distribution_text)
+                elif message.content_type == 'video':
+                    video_id = message.video.file_id
+                    bot.send_video(uid, video_id, caption=distribution_text)
+                elif message.content_type == 'text':
+                    bot.send_message(uid, distribution_text)
+                # Добавьте здесь логику для других типов медиафайлов, если это необходимо
+            except Exception as e:
+                print(f"Error sending message to {uid}: {e}")
+
+        bot.send_message(message.chat.id, "Рассылка выполнена.", reply_markup=moderator_keyboard)
+    else:
+        bot.send_message(user_id, "У вас нет прав для выполнения этой команды.")
+
+
+if __name__ == '__main__':
+    bot.infinity_polling()
